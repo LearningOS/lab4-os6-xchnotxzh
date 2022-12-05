@@ -167,6 +167,21 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     v
 }
 
+/// 复制内核空间地址数据到用户空间地址
+/// 参数 -- token: 用户地址空间token，dst_user_va：用户空间目标地址，内核空间源数据地址，len：数据字节长度
+pub fn copy_kernel_to_user(token: usize, kernel_src_va: *const u8, user_dst_va: usize, len: usize) {
+    // 用户空间采用Framed映射，内核空间采用恒等映射，所以只需要翻译用户空间地址
+    let page_table = PageTable::from_token(token);
+    let user_start_va = VirtAddr::from(user_dst_va);
+    let user_start_vpn = user_start_va.floor();
+    let user_start_ppn = page_table.translate(user_start_vpn).unwrap().ppn();
+    let user_dst_pa = &mut user_start_ppn.get_bytes_array()[user_start_va.page_offset()..user_start_va.page_offset() + len];
+    unsafe {
+        user_dst_pa.copy_from_slice(core::slice::from_raw_parts(kernel_src_va, len));
+    };
+}
+
+
 pub fn translated_str(token: usize, ptr: *const u8) -> String {
     let page_table = PageTable::from_token(token);
     let mut string = String::new();

@@ -18,8 +18,7 @@ pub use address::{StepByOne, VPNRange};
 pub use frame_allocator::{frame_alloc, frame_dealloc, FrameTracker};
 pub use memory_set::{remap_test, kernel_token};
 pub use memory_set::{MapPermission, MemorySet, KERNEL_SPACE};
-pub use page_table::{translated_byte_buffer, translated_refmut, translated_ref, translated_str, PageTableEntry};
-pub use page_table::{PTEFlags, PageTable, UserBuffer};
+pub use page_table::{translated_byte_buffer, copy_kernel_to_user, translated_refmut, translated_str, PTEFlags, PageTable, PageTableEntry, UserBuffer};
 
 /// initiate heap allocator, frame allocator and kernel space
 pub fn init() {

@@ -1,8 +1,9 @@
 //! Types related to task management & Functions for completely changing TCB
 
 use super::TaskContext;
+use super::manager::Pass;
 use super::{pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT;
+use crate::config::{TRAP_CONTEXT, MAX_SYSCALL_NUM};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -49,6 +50,12 @@ pub struct TaskControlBlockInner {
     pub children: Vec<Arc<TaskControlBlock>>,
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
+    /// stride scheduling priority
+    pub priority: isize,
+    /// stride scheduling pass
+    pub pass: Pass,
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub start_time: usize,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
 }
 
@@ -116,6 +123,10 @@ impl TaskControlBlock {
                     parent: None,
                     children: Vec::new(),
                     exit_code: 0,
+                    priority: 16,
+                    pass: Pass::new(),
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                     fd_table: alloc::vec![
                         // 0 -> stdin
                         Some(Arc::new(Stdin)),
@@ -199,6 +210,10 @@ impl TaskControlBlock {
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
+                    priority: parent_inner.priority,
+                    pass: parent_inner.pass,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                     fd_table: new_fd_table,
                 })
             },
@@ -214,6 +229,46 @@ impl TaskControlBlock {
         // ---- release parent PCB automatically
         // **** release children PCB automatically
     }
+    
+    // spawn a child process
+    pub fn spawn(self: &Arc<TaskControlBlock>, elf_data: &[u8]) -> Arc<TaskControlBlock> {
+        let mut parent_inner = self.inner_exclusive_access();
+        let pid_handle = pid_alloc();
+        let kernel_stack = KernelStack::new(&pid_handle);
+        let kernel_stack_top = kernel_stack.get_top();
+        let task_control_block = Arc::new(TaskControlBlock {
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn: PhysPageNum::from(0),
+                    base_size: parent_inner.base_size,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    memory_set: MemorySet::new_bare(),
+                    parent: Some(Arc::downgrade(self)),
+                    children: Vec::new(),
+                    priority: parent_inner.priority,
+                    pass: parent_inner.pass,
+                    exit_code: 0,
+                    fd_table: alloc::vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
+                })
+            },
+        });
+        parent_inner.children.push(task_control_block.clone());
+        task_control_block.exec(elf_data);
+        task_control_block
+    }
+    
     pub fn getpid(&self) -> usize {
         self.pid.0
     }

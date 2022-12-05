@@ -264,6 +264,23 @@ impl MemorySet {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
+    pub fn conflict_with_range(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        self.areas.iter().find(|&area|{
+            area.conflict_with_range(start_va, end_va)
+        }).is_some()
+    }
+    pub fn unmap_area_by_exact_range(&mut self, start_vn: VirtPageNum, end_vn: VirtPageNum) -> isize {
+        for i in 0..self.areas.len(){
+            let area = &mut self.areas[i];
+            let vrange = area.vpn_range;
+            if start_vn == vrange.get_start() && end_vn == vrange.get_end() {
+                area.unmap(&mut self.page_table);
+                self.areas.swap_remove(i);
+                return 0;
+            }
+        }
+        -1
+    }
     pub fn recycle_data_pages(&mut self) {
         //*self = Self::new_bare();
         self.areas.clear();
@@ -337,6 +354,11 @@ impl MapArea {
         for vpn in self.vpn_range {
             self.unmap_one(page_table, vpn);
         }
+    }
+    pub fn conflict_with_range(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        let self_start: VirtAddr = self.vpn_range.get_start().into();
+        let self_end: VirtAddr = self.vpn_range.get_end().into();
+        start_va < self_end && end_va > self_start 
     }
     /// data: start-aligned but maybe with shorter length
     /// assume that all frames were cleared before

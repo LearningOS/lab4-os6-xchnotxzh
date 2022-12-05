@@ -21,8 +21,7 @@ use alloc::sync::Arc;
 use lazy_static::*;
 use manager::fetch_task;
 use switch::__switch;
-use crate::mm::VirtAddr;
-use crate::mm::MapPermission;
+use crate::mm::{VirtAddr, MapPermission};
 use crate::config::PAGE_SIZE;
 use crate::timer::get_time_us;
 pub use crate::syscall::process::TaskInfo;
@@ -30,7 +29,7 @@ use crate::fs::{open_file, OpenFlags};
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
-pub use manager::add_task;
+pub use manager::{add_task, set_priority};
 pub use pid::{pid_alloc, KernelStack, PidHandle};
 pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
@@ -103,4 +102,48 @@ lazy_static! {
 
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+pub fn update_syscall_times(syscall_id: usize) {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    inner.syscall_times[syscall_id] += 1;
+}
+
+pub fn mmap(start_va: VirtAddr, end_va: VirtAddr, port: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    let mem_set = &mut inner.memory_set;
+    let end_va = end_va.ceil().into();
+    if mem_set.conflict_with_range(start_va, end_va) {
+        return -1;
+    }
+    let mut perm = MapPermission::U;
+    if (port & (1 << 0)) != 0 {
+        perm |= MapPermission::R;
+    }
+    if (port & (1 << 1)) != 0 {
+        perm |= MapPermission::W;
+    }
+    if (port & (1 << 2)) != 0 {
+        perm |= MapPermission::X;
+    }
+    mem_set.insert_framed_area(
+        start_va,
+        end_va,
+        perm
+    );
+    info!("mmap: [{:#x}, {:#x}]", usize::from(start_va), usize::from(end_va));
+    0
+}
+
+pub fn munmap(start_va: VirtAddr, end_va: VirtAddr) -> isize {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    let mem_set = &mut inner.memory_set;
+    let start_vn = start_va.floor();
+    let end_vn = end_va.ceil();
+    let ret = mem_set.unmap_area_by_exact_range(start_vn, end_vn);
+    info!("munmap: [{:#x}, {:#x}]", usize::from(start_vn), usize::from(end_vn));
+    ret
 }

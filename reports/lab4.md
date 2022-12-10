@@ -5,18 +5,18 @@
 ## linkat
 
 - 实现功能 -- 给根节点下的已有名字的文件增加硬链接，也就是别名
-- 实现策略 -- 在 `DiskInode` 中添加硬链接计数，增加硬链接意味着
-  - 要找到旧名字文件的inode_id
-  - 修改根节点元数据 -- 根节点`DiskInode`要硬链接计数递增
-  - 修改根节点数据 -- 根节点`DiskInode`索引的数据，增加一个DirEntry(newname, inode_id)。
+- 实现策略 -- 在 `DiskInode` 中添加硬链接计数，增加硬链接需要
+  - 根据旧名字找到文件
+  - 更新文件索引节点 -- 文件`DiskInode`的硬链接计数递增
+  - 更新根节点数据 -- 根节点数据增加一个DirEntry(newname, inode_id)。
 
 ## unlinkat
 
 - 实现功能 -- 删除硬链接，也就是取消别名
-- 实现策略 -- 给同一个inode删除一个DirEntry，若变成0个，则先删inode？
-  - 要找名字文件的inode_id
-  - 修改根节点元数据 -- 根节点`DiskInode`要硬链接计数递减
-  - 修改根节点数据 -- 根节点`DiskInode`索引的数据，去掉一个DirEntry(name, inode_id)。
+- 实现策略 -- 给同一个inode删除DirEntry
+  - 根据名字找到文件
+  - 更新文件索引节点 -- 文件`DiskInode`的硬链接计数递减，若变成0个，则要删该索引节点
+  - 更新根节点数据 -- 根节点数据去掉一个DirEntry(name, inode_id)。
 
 ## fstat
 

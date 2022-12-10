@@ -232,7 +232,7 @@ impl Inode {
                     &self.block_device,
                 );
             });
-            self.modify_disk_inode(|disk_inode: &mut DiskInode| {
+            old_inode.modify_disk_inode(|disk_inode: &mut DiskInode| {
                 disk_inode.nlink += 1;
                 disk_inode.nlink
             });
@@ -244,31 +244,39 @@ impl Inode {
 
     pub fn unlink(&self, name: &str) -> isize {
         if let Some(inode) = self.find(name) {
-            let link = self.modify_disk_inode(|disk_inode: &mut DiskInode| {
+            let link = inode.modify_disk_inode(|disk_inode: &mut DiskInode| {
                 disk_inode.nlink -= 1;
                 disk_inode.nlink
             });
+
+            let file_count = self.read_disk_inode(|root_inode| {
+                 (root_inode.size as usize) / DIRENT_SZ
+            });
+            let mut dirent = DirEntry::new(&name, inode.inode_id as u32);
+            for i in 0..file_count {
+                assert_eq!(
+                    self.read_at(DIRENT_SZ * i, dirent.as_bytes_mut()),
+                    DIRENT_SZ,
+                );
+                if dirent.name() == name {
+                    let new_dirent = DirEntry::new("", 0);
+                    self.write_at(i * DIRENT_SZ, new_dirent.as_bytes());
+                }
+            }
+
             if link == 0 {
                 inode.clear();
-                let file_count = self.modify_disk_inode(|root_inode| {
-                     (root_inode.size as usize) / DIRENT_SZ
-                });
-                let mut dirent = DirEntry::new(&name, inode.inode_id as u32);
-                for i in 0..file_count {
-                    assert_eq!(
-                        self.read_at(DIRENT_SZ * i, dirent.as_bytes_mut()),
-                        DIRENT_SZ,
-                    );
-                    if dirent.name() == name {
-                        let new_dirent = DirEntry::new("", 0);
-                        self.write_at(i * DIRENT_SZ, new_dirent.as_bytes());
-                    }
-                }
-                block_cache_sync_all();
             }
+            block_cache_sync_all();
             return 0;
         }
         -1
+    }
+
+    pub fn nlink(&self) -> u32 {
+        self.read_disk_inode(|disk_inode|{
+            disk_inode.nlink
+        })
     }
 
     pub fn inode_id(&self) -> u64 {
@@ -281,11 +289,6 @@ impl Inode {
             } else {
                 false
             }
-        })
-    }
-    pub fn nlink(&self) -> u32 {
-        self.read_disk_inode(|disk_inode|{
-            disk_inode.nlink
         })
     }
 }

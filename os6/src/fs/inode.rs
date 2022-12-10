@@ -8,7 +8,7 @@ use alloc::sync::Arc;
 use lazy_static::*;
 use bitflags::*;
 use alloc::vec::Vec;
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::mm::UserBuffer;
 
 /// A wrapper around a filesystem inode
@@ -166,4 +166,25 @@ impl File for OSInode {
         }
         total_write_size
     }
+    fn fstat(&self) -> Stat {
+        let mut inner = self.inner.exclusive_access();
+        Stat {
+            dev:0,
+            ino: inner.inode.inode_id(),
+            mode: match inner.inode.is_dir() {
+                true => StatMode::DIR,
+                false => StatMode::FILE
+            },
+            nlink:inner.inode.nlink(),
+            pad:[0;7],
+        }
+    }
+}
+
+pub fn link_file(oldname: &str, newname: &str) -> isize {
+    ROOT_INODE.link(oldname, newname)
+}
+
+pub fn unlink_file(name: &str) -> isize {
+    ROOT_INODE.unlink(name)
 }

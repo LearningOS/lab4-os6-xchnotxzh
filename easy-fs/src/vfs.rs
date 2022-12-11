@@ -242,117 +242,8 @@ impl Inode {
         -1
     }
 
-    // pub fn unlink(&self, name: &str) -> isize {
-    //     if let Some(inode) = self.find(name) {
-    //         let nlink = inode.modify_disk_inode(|disk_inode: &mut DiskInode| {
-    //             disk_inode.nlink -= 1;
-    //             disk_inode.nlink
-    //         });
-
-    //         let file_count = self.read_disk_inode(|root_inode| {
-    //              (root_inode.size as usize) / DIRENT_SZ
-    //         });
-    //         let mut dirent = DirEntry::new(&name, inode.inode_id as u32);
-    //         for i in 0..file_count {
-    //             assert_eq!(
-    //                 self.read_at(DIRENT_SZ * i, dirent.as_bytes_mut()),
-    //                 DIRENT_SZ,
-    //             );
-    //             if dirent.name() == name {
-    //                 let new_dirent = DirEntry::empty();
-    //                 self.write_at(i * DIRENT_SZ, new_dirent.as_bytes());
-    //             }
-    //         }
-
-    //         if nlink == 0 {
-    //             inode.clear();
-    //         }
-    //         block_cache_sync_all();
-    //         return 0;
-    //     }
-    //     -1
-    // }
-
-
-    // pub fn unlink(&self, name: &str) -> isize {
-    //     let mut fs = self.fs.lock();
-    //     let mut to_unlink_inode_id: Option<u32> = None;
-    //     let mut new_dirent_vec: Vec<DirEntry> = Vec::new();
-    //     self.read_disk_inode(|root_inode| {
-    //         let file_count = (root_inode.size as usize) / DIRENT_SZ;
-    //         for i in 0..file_count {
-    //             let mut dirent = DirEntry::empty();
-    //             assert_eq!(
-    //                 root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
-    //                 DIRENT_SZ,
-    //             );
-    //             if dirent.name() != name {
-    //                 new_dirent_vec.push(dirent);
-    //             } else {
-    //                 to_unlink_inode_id = Some(dirent.inode_number());
-    //             }
-    //         }
-    //     });
-    //     self.modify_disk_inode(|root_inode| {
-    //         let size = root_inode.size;
-    //         let data_blocks_dealloc = root_inode.clear_size(&self.block_device);
-    //         assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
-    //         for data_block in data_blocks_dealloc.into_iter() {
-    //             fs.dealloc_data(data_block);
-    //         }
-    //         self.increase_size((new_dirent_vec.len() * DIRENT_SZ) as u32, root_inode, &mut fs);
-    //         for (i, dirent) in new_dirent_vec.iter().enumerate() {
-    //             root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
-    //         }
-    //     });
-    //     if to_unlink_inode_id.is_none() {
-    //         return -1;
-    //     }
-    //     let (block_id, block_offset) = fs.get_disk_inode_pos(to_unlink_inode_id.unwrap());
-    //     get_block_cache(block_id as usize, Arc::clone(&self.block_device))
-    //         .lock()
-    //         .modify(block_offset, |di: &mut DiskInode| {
-    //             di.nlink -= 1;
-    //             if di.nlink == 0 {
-    //                 let size = di.size;
-    //                 let data_blocks_dealloc = di.clear_size(&self.block_device);
-    //                 assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
-    //                 for data_block in data_blocks_dealloc.into_iter() {
-    //                     fs.dealloc_data(data_block);
-    //                 }
-    //             }
-    //          });
-    //     block_cache_sync_all();
-    //     0
-    // }
-
-
-    // pub fn link(&self, new_name: &str, old_name: &str) -> isize {
-    //     if let Some(old_inode) = self.find(old_name) {
-    //         let mut fs = self.fs.lock();
-    //         self.modify_disk_inode(|root_inode| {
-    //             // append file in the dirent
-    //             let file_count = (root_inode.size as usize) / DIRENT_SZ;
-    //             let new_size = (file_count + 1) * DIRENT_SZ;
-    //             // increase size
-    //             self.increase_size(new_size as u32, root_inode, &mut fs);
-    //             // write dirent
-    //             let dirent = DirEntry::new(new_name, old_inode.inode_id as u32);
-    //             root_inode.write_at(
-    //                 file_count * DIRENT_SZ,
-    //                 dirent.as_bytes(),
-    //                 &self.block_device,
-    //             );
-    //         });
-    //         block_cache_sync_all();
-    //         return 0;
-    //     } else {
-    //         return -1;
-    //     }
-    // }
-
     pub fn unlink(&self, name: &str) -> isize {
-        let _fs = self.fs.lock();
+        let fs = self.fs.lock();
         self.modify_disk_inode(|disk_inode| {
             let file_count = (disk_inode.size as usize) / DIRENT_SZ;
             (0..file_count).for_each(|i| {
@@ -362,18 +253,31 @@ impl Inode {
                     DIRENT_SZ,
                 );
                 if dirent.name() == name {
-                    disk_inode.nlink-=1;
                     disk_inode.write_at(
                         i * DIRENT_SZ,
                         DirEntry::empty().as_bytes(),
                         &self.block_device,
                     );
-                }
+                    let (block_id, block_offset) = fs.get_disk_inode_pos(dirent.inode_number());
+                    get_block_cache(block_id as usize, Arc::clone(&self.block_device))
+                        .lock()
+                        .modify(block_offset, |di: &mut DiskInode| {
+                            di.nlink -= 1;
+                            // 清理会超时
+                            // if di.nlink == 0 {
+                            //     let size = di.size;
+                            //     let data_blocks_dealloc = di.clear_size(&self.block_device);
+                            //     assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+                            //     for data_block in data_blocks_dealloc.into_iter() {
+                            //         fs.dealloc_data(data_block);
+                            //     }
+                            // }
+                        });
+                    }
             })
         });
 
         block_cache_sync_all();
-
         0
     }
 
